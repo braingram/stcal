@@ -509,11 +509,8 @@ def calc_slope_vars(ramp_data, rn_sect, gain_sect, gdq_sect, group_time, max_seg
     gdq_2d_nan = gdq_2d.copy()  # group dq with SATS will be replaced by nans
     gdq_2d_nan = gdq_2d_nan.astype(np.float32)
 
-    wh_sat = np.where(np.bitwise_and(gdq_2d, ramp_data.flags_saturated))
-    if len(wh_sat[0]) > 0:
-        gdq_2d_nan[wh_sat] = np.nan  # set all SAT groups to nan
-
-    del wh_sat
+    # set all SAT groups to nan
+    gdq_2d_nan[np.bitwise_and(gdq_2d, ramp_data.flags_saturated).astype(bool)] = np.nan
 
     # Get lengths of semiramps for all pix [number_of_semiramps, number_of_pix]
     segs = np.zeros_like(gdq_2d)
@@ -526,11 +523,10 @@ def calc_slope_vars(ramp_data, rn_sect, gain_sect, gdq_sect, group_time, max_seg
     # Loop over reads for all pixels to get segments (segments per pixel)
     while i_read < nreads and np.any(pix_not_done):
         gdq_1d = gdq_2d_nan[i_read, :]
-        wh_good = np.where(gdq_1d == 0)  # good groups
+        wh_good = gdq_1d == 0  # good groups
 
         # if this group is good, increment those pixels' segments' lengths
-        if len(wh_good[0]) > 0:
-            segs[sr_index[wh_good], wh_good] += 1
+        segs[sr_index[wh_good], wh_good] += 1
         del wh_good
 
         # Locate any CRs that appear before the first SAT group...
@@ -547,11 +543,7 @@ def calc_slope_vars(ramp_data, rn_sect, gain_sect, gdq_sect, group_time, max_seg
         del wh_cr
 
         # If current group is a NaN, this pixel is done (pix_not_done is False)
-        wh_nan = np.where(np.isnan(gdq_2d_nan[i_read, :]))
-        if len(wh_nan[0]) > 0:
-            pix_not_done[wh_nan[0]] = False
-
-        del wh_nan
+        pix_not_done[np.isnan(gdq_2d_nan[i_read, :])] = False
 
         i_read += 1
 
@@ -621,7 +613,7 @@ def calc_slope_vars(ramp_data, rn_sect, gain_sect, gdq_sect, group_time, max_seg
     #   be compared to the plane of (near) zeros resulting from the reset. For
     #   longer segments, this value is overwritten below.
     den_r3 = num_r3.copy() * 0. + 1. / 6
-    wh_seg_pos = np.where(segs_beg_3 > 1)
+    wh_seg_pos = segs_beg_3 > 1
 
     # Suppress, then, re-enable harmless arithmetic warnings, as NaN will be
     #   checked for and handled later
@@ -736,8 +728,7 @@ def output_integ(ramp_data, slope_int, dq_int, effintim, var_p3, var_r3, var_bot
 
     data = slope_int / effintim
     invalid_data = ramp_data.flags_saturated | ramp_data.flags_do_not_use
-    wh_invalid = np.where(np.bitwise_and(dq_int, invalid_data))
-    data[wh_invalid] = np.nan
+    data[np.bitwise_and(dq_int, invalid_data).astype(bool)] = np.nan
 
     err = np.sqrt(var_both3)
     dq = dq_int
@@ -995,12 +986,8 @@ def get_max_num_cr(gdq_cube, jump_flag):  # pragma: no cover
     max_num_cr : int
         The maximum number of cosmic-ray hits for any pixel.
     """
-    cr_flagged = np.empty(gdq_cube.shape, dtype=np.uint8)
-    cr_flagged[:] = np.where(np.bitwise_and(gdq_cube, jump_flag), 1, 0)
-    max_num_cr = cr_flagged.sum(axis=0, dtype=np.int32).max()
-    del cr_flagged
-
-    return max_num_cr
+    # not sure why the previous code was storing a count in an int32
+    return np.count_nonzero(np.bitwise_and(gdq_cube, jump_flag), axis=0).max().astype(np.int32)
 
 
 def reset_bad_gain(ramp_data, pdq, gain):
@@ -1029,16 +1016,7 @@ def reset_bad_gain(ramp_data, pdq, gain):
         warnings.filterwarnings("ignore", "invalid value.*", RuntimeWarning)
         wh_g = np.where(gain <= 0.)
     '''
-    wh_g = np.where(gain <= 0.)
-    if len(wh_g[0]) > 0:
-        pdq[wh_g] = np.bitwise_or(pdq[wh_g], ramp_data.flags_no_gain_val)
-        pdq[wh_g] = np.bitwise_or(pdq[wh_g], ramp_data.flags_do_not_use)
-
-    wh_g = np.where(np.isnan(gain))
-    if len(wh_g[0]) > 0:
-        pdq[wh_g] = np.bitwise_or(pdq[wh_g], ramp_data.flags_no_gain_val)
-        pdq[wh_g] = np.bitwise_or(pdq[wh_g], ramp_data.flags_do_not_use)
-
+    pdq[(gain <= 0.) | np.isnan(gain)] |= ramp_data.flags_no_gain_val | ramp_data.flags_do_not_use
     return pdq
 
 
@@ -1067,8 +1045,8 @@ def remove_bad_singles(segs_beg_3):
     max_seg = segs_beg_3.shape[0]
 
     # get initial number of ramps having single-group segments
-    tot_num_single_grp_ramps = len(np.where((segs_beg_3 == 1) &
-                                            (segs_beg_3.sum(axis=0) > 1))[0])
+    tot_num_single_grp_ramps = np.count_nonzero(
+        (segs_beg_3 == 1) & (segs_beg_3.sum(axis=0) > 1))
 
     while tot_num_single_grp_ramps > 0:
         # until there are no more single-group segments
@@ -1083,23 +1061,23 @@ def remove_bad_singles(segs_beg_3):
 
                 # Find ramps of a single-group segment and another segment
                 # either earlier or later
-                wh_y, wh_x = np.where((slice_0 == 1) & (slice_1 > 0))
+                wh = (slice_0 == 1) & (slice_1 > 0)
 
-                if len(wh_y) == 0:
+                if not np.any(wh):
                     # Are none, so go to next pair of segments to check
                     continue
 
                 # Remove the 1-group segment
-                segs_beg_3[ii_0:-1, wh_y, wh_x] = segs_beg_3[ii_0 + 1:, wh_y, wh_x]
+                segs_beg_3[ii_0:-1, wh] = segs_beg_3[ii_0 + 1:, wh]
 
                 # Zero the last segment entry for the ramp, which would otherwise
                 # remain non-zero due to the shift
-                segs_beg_3[-1, wh_y, wh_x] = 0
+                segs_beg_3[-1, wh] = 0
 
-                del wh_y, wh_x
+                del wh
 
-                tot_num_single_grp_ramps = len(np.where((segs_beg_3 == 1) &
-                                                        (segs_beg_3.sum(axis=0) > 1))[0])
+                tot_num_single_grp_ramps = np.count_nonzero(
+                    (segs_beg_3 == 1) & (segs_beg_3.sum(axis=0) > 1))
 
     return segs_beg_3
 
@@ -1270,10 +1248,10 @@ def log_stats(c_rates):
     -------
     None
     """
-    wh_c_0 = np.where(c_rates == 0.)  # insuff data or no signal
+    n_c_0 = np.count_nonzero(c_rates == 0.)  # insuff data or no signal
 
     log.debug('The number of pixels having insufficient data')
-    log.debug('due to excessive CRs or saturation %d:', len(wh_c_0[0]))
+    log.debug('due to excessive CRs or saturation %d:', n_c_0)
     log.debug('Count rates - min, mean, max, std: %f, %f, %f, %f'
               % (c_rates.min(), c_rates.mean(), c_rates.max(), c_rates.std()))
 
@@ -1377,18 +1355,8 @@ def set_if_total_integ(final_dq, integ_dq, flag, set_flag):
     set_flag : int
         Flag to set if flag is found in each integration.
     """
-    nints = integ_dq.shape[0]
-
-    # Find where flag is set
-    test_dq = np.zeros(integ_dq.shape, dtype=np.uint32)
-    test_dq[np.where(np.bitwise_and(integ_dq, flag))] = 1
-
-    # Sum over all integrations
-    test_sum = test_dq.sum(axis=0)
-    all_set = np.where(test_sum == nints)
-
     # If flag is set in all integrations, then set the set_flag
-    final_dq[all_set] = np.bitwise_or(final_dq[all_set], set_flag)
+    final_dq[np.all(np.bitwise_and(integ_dq, flag), axis=0)] |= set_flag
 
 
 def dq_compress_sect(ramp_data, num_int, gdq_sect, pixeldq_sect):
@@ -1434,9 +1402,7 @@ def dq_compress_sect(ramp_data, num_int, gdq_sect, pixeldq_sect):
         pixeldq_sect[gdq0_sat != 0], sat | dnu)
 
     # If jump occurs mark the appropriate flag.
-    jump_loc = np.bitwise_and(gdq_sect, jump)
-    jump_check = np.where(jump_loc.sum(axis=0) > 0)
-    pixeldq_sect[jump_check] = np.bitwise_or(pixeldq_sect[jump_check], jump)
+    pixeldq_sect[np.any(np.bitwise_and(gdq_sect, jump), axis=0)] |= jump
 
     return pixeldq_sect
 
@@ -1499,10 +1465,7 @@ def compute_median_rates(ramp_data):
         gdq_sect = ramp_data.groupdq[integ, :, :, :]
 
         # Reset all saturated groups in the input data array to NaN
-        where_sat = np.where(np.bitwise_and(gdq_sect, ramp_data.flags_saturated))
-
-        data_sect[where_sat] = np.NaN
-        del where_sat
+        data_sect[np.bitwise_and(gdq_sect, ramp_data.flags_saturated).astype(bool)] = np.NaN
 
         data_sect = data_sect / group_time
 
@@ -1528,33 +1491,26 @@ def compute_median_rates(ramp_data):
         else:
             # Similarly, for datasets having >1 group/integ and having
             #   single-group segments, just use the data as the difference
-            wh_nan = np.where(np.isnan(first_diffs_sect[0, :, :]))
-
-            if len(wh_nan[0]) > 0:
-                first_diffs_sect[0, :, :][wh_nan] = data_sect[0, :, :][wh_nan]
-
+            wh_nan = np.isnan(first_diffs_sect[0, :, :])
+            first_diffs_sect[0, :, :][wh_nan] = data_sect[0, :, :][wh_nan]
             del wh_nan
 
             # Mask all the first differences that are affected by a CR,
             #   starting at group 1.  The purpose of starting at index 1 is
             #   to shift all the indices down by 1, so they line up with the
             #   indices in first_diffs.
-            i_group, i_yy, i_xx, = np.where(np.bitwise_and(
-                gdq_sect[1:, :, :], ramp_data.flags_jump_det))
-            first_diffs_sect[i_group, i_yy, i_xx] = np.NaN
-
-            del i_group, i_yy, i_xx
+            first_diffs_sect[
+                np.bitwise_and(gdq_sect[1:, :, :], ramp_data.flags_jump_det).astype(bool)
+            ] = np.NaN
 
             # Check for pixels in which there is good data in 0th group, but
             #   all first_diffs for this ramp are NaN because there are too
             #   few good groups past the 0th. Due to the shortage of good
             #   data, the first_diffs will be set here equal to the data in
             #   the 0th group.
-            wh_min = np.where(np.logical_and(
-                np.isnan(first_diffs_sect).all(axis=0), np.isfinite(data_sect[0, :, :])))
-            if len(wh_min[0] > 0):
-                first_diffs_sect[0, :, :][wh_min] = data_sect[0, :, :][wh_min]
-
+            wh_min = np.logical_and(
+                np.isnan(first_diffs_sect).all(axis=0), np.isfinite(data_sect[0, :, :]))
+            first_diffs_sect[0, :, :][wh_min] = data_sect[0, :, :][wh_min]
             del wh_min
 
         # All first differences affected by saturation and CRs have been set
@@ -1643,9 +1599,4 @@ def groups_saturated_in_integration(intdq, sat_flag, num_sat_groups):
     num_sat_groups : int
         The number of saturated groups in an integration of interest.
     """
-    sat_groups = np.zeros(intdq.shape, dtype=int)
-    sat_groups[np.where(np.bitwise_and(intdq, sat_flag))] = 1
-    nsat_groups = sat_groups.sum(axis=0)
-    wh_nsat_groups = np.where(nsat_groups == num_sat_groups)
-
-    return wh_nsat_groups
+    return np.where(np.sum(np.bitwise_and(intdq, sat_flag), axis=0) == (num_sat_groups * sat_flag))
