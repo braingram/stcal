@@ -82,6 +82,7 @@ class LibModelAccessBase(abc.ABC):
         "wcsinfo",
         "wcs",
 
+        # BJG roman handles exposure time differently
         "exposure_time",
         "start_time",
         "end_time",
@@ -101,15 +102,21 @@ class LibModelAccessBase(abc.ABC):
         "n_coadds",
     ]
 
+    # BJG only used in:
+    # - resampled_wcs_from_models. How does this differ from wcs_from_footprints
+    # - run. In a small loop that iters, calls add_model, update_total_time (this is overridden in jwst)
     @abc.abstractmethod
     def iter_model(self, attributes=None):
         ...
 
+    # BJG only used in init_resample_data
+    # I'm not sure how this will work for resample_group
     @property
     @abc.abstractmethod
     def n_models(self):
         ...
 
+    # BJG unused
     @property
     @abc.abstractmethod
     def n_groups(self):
@@ -983,6 +990,7 @@ class Resample:
         if self._enable_var:
             self.init_resample_variance()
 
+        # BJG this reads the entire model since attributes is None
         for model_info, image_model in self._input_models.iter_model():
             self.add_model(model_info, image_model)
             self.update_total_time(model_info)
