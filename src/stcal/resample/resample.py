@@ -105,22 +105,22 @@ class LibModelAccessBase(abc.ABC):
     # BJG only used in:
     # - resampled_wcs_from_models. How does this differ from wcs_from_footprints
     # - run. In a small loop that iters, calls add_model, update_total_time (this is overridden in jwst)
-    @abc.abstractmethod
-    def iter_model(self, attributes=None):
-        ...
+    #@abc.abstractmethod
+    #def iter_model(self, attributes=None):
+    #    ...
 
     # BJG only used in init_resample_data
     # I'm not sure how this will work for resample_group
-    @property
-    @abc.abstractmethod
-    def n_models(self):
-        ...
+    # @property
+    # @abc.abstractmethod
+    # def n_models(self):
+    #     ...
 
-    # BJG unused
-    @property
-    @abc.abstractmethod
-    def n_groups(self):
-        ...
+    # # BJG unused
+    # @property
+    # @abc.abstractmethod
+    # def n_groups(self):
+    #     ...
 
 
 def resampled_wcs_from_models(
@@ -274,6 +274,7 @@ class Resample:
     resample_suffix = 'i2d'
     resample_file_ext = '.fits'
 
+    # BJG this casting can take place in the pipelines if needed
     # supported output arrays (subclasses can add more):
     output_array_types = {
         "data": np.float32,
@@ -287,7 +288,7 @@ class Resample:
 
     dq_flag_name_map = {}
 
-    def __init__(self, input_models, pixfrac=1.0, kernel="square",
+    def __init__(self, n_models, pixfrac=1.0, kernel="square",
                  fillval=0.0, wht_type="ivm", good_bits=0,
                  output_wcs=None, wcs_pars=None, output_model=None,
                  accumulate=False, enable_ctx=True, enable_var=True,
@@ -295,9 +296,7 @@ class Resample:
         """
         Parameters
         ----------
-        input_models : LibModelAccessBase
-            A `LibModelAccessBase`-based object allowing iterating over
-            all contained models of interest.
+        n_models:
 
         kwargs : dict
             Other parameters.
@@ -306,9 +305,6 @@ class Resample:
                 ``output_shape`` is in the ``x, y`` order.
 
         """
-        # input models
-        self._input_models = input_models
-
         self._output_model = None
         self._output_wcs = None
         self._enable_ctx = enable_ctx
@@ -347,6 +343,7 @@ class Resample:
         # determine output WCS and set-up output model if needed:
         if output_model is None:
             if output_wcs is None:
+                assert False
                 output_wcs, _, ps, ps_ratio = resampled_wcs_from_models(
                     input_models,
                     pixel_scale_ratio=wcs_pars.get("pixel_scale_ratio", 1.0),
@@ -407,6 +404,7 @@ class Resample:
         # set up output model (arrays, etc.)
         if self._output_model is None:
             self._output_model = self.create_output_model(
+                n_models,
                 allowed_memory=allowed_memory
             )
 
@@ -418,6 +416,11 @@ class Resample:
         log.info(f"Driz parameter weight_type: {self.weight_type}")
 
         log.debug(f"Output mosaic size: {self._output_wcs.pixel_shape}")
+
+        self.init_time_info()
+        self.init_resample_data(n_models)
+        if self._enable_var:
+            self.init_resample_variance()
 
     def check_output_wcs(self, output_wcs, wcs_pars,
                          estimate_output_shape=True):
@@ -545,7 +548,7 @@ class Resample:
         # TODO: also check "pixfrac", "kernel", "fillval", "weight_type"
         # with initializer parameters. log a warning if different.
 
-    def create_output_model(self, allowed_memory):
+    def create_output_model(self, n_models, allowed_memory):
         """ Create a new "output model": a dictionary of data and meta fields.
         Check that there is enough memory to hold all arrays.
         """
@@ -603,7 +606,7 @@ class Resample:
             )
 
         if allowed_memory:
-            self.check_memory_requirements(list(output_model), allowed_memory)
+            self.check_memory_requirements(n_models, list(output_model), allowed_memory)
 
         return output_model
 
@@ -619,7 +622,7 @@ class Resample:
     def group_ids(self):
         return self._group_ids
 
-    def check_memory_requirements(self, arrays, allowed_memory):
+    def check_memory_requirements(self, nmodels, arrays, allowed_memory):
         """ Called just before `create_output_model` returns to verify
         that there is enough memory to hold the output.
 
@@ -637,7 +640,6 @@ class Resample:
 
         # compute the output array size
         npix = npix = np.prod(self._output_array_shape)
-        nmodels = len(self._input_models)
         nconpl = nmodels // 32 + (1 if nmodels % 32 else 0)  # #context planes
         required_memory = 0
         for arr in arrays:
@@ -825,7 +827,7 @@ class Resample:
 
         self._output_model.update(attrs)
 
-    def init_resample_data(self):
+    def init_resample_data(self, n_models):
         """ Create a `Drizzle` object to process image data. """
         om = self._output_model
 
@@ -838,7 +840,7 @@ class Resample:
             out_ctx=om["con"],
             exptime=om["exposure_time"],
             begin_ctx_id=om["n_coadds"],
-            max_ctx_id=om["n_coadds"] + self._input_models.n_models,
+            max_ctx_id=om["n_coadds"] + n_models,
         )
 
     def init_resample_variance(self):
@@ -887,7 +889,7 @@ class Resample:
 
         return True
 
-    def add_model(self, model_info, image_model):
+    def add_model(self, model_info):
         """ Resample and add data (variance, etc.) arrays to the output arrays.
 
         Parameters
@@ -896,7 +898,10 @@ class Resample:
         model_info : dict
             A dictionary with data extracted from an image model needed for
             `Resample` to successfully process this model.
+            # BJG it's unclear what is expected here
 
+        # BJG this is not needed as the pipeline will need to first
+        # handle the model
         image_model : object
             The original data model from which ``model`` data was extracted.
             It is not used by this method in this class but can be used
@@ -975,26 +980,9 @@ class Resample:
 
         if self._enable_var:
             self.resample_variance_data(model_info, add_image_kwargs)
+        self.update_total_time(model_info)
 
-    def run(self):
-        """ Resample and coadd many inputs to a single output.
-
-        1. Call methods that initialize data, variance, and time computations.
-        2. Add input images (data, variances, etc) to output arrays.
-        3. Perform final computations to compute variance and error
-           arrays and total expose time information for the resampled image.
-
-        """
-        self.init_time_info()
-        self.init_resample_data()
-        if self._enable_var:
-            self.init_resample_variance()
-
-        # BJG this reads the entire model since attributes is None
-        for model_info, image_model in self._input_models.iter_model():
-            self.add_model(model_info, image_model)
-            self.update_total_time(model_info)
-
+    def finalize(self):
         # assign resampled arrays to the output model dictionary:
         self._output_model["data"] = self.driz_data.out_img.astype(
             dtype=self.output_array_types["data"]
@@ -1013,6 +1001,7 @@ class Resample:
             self.compute_errors()
 
         self.finalize_time_info()
+        return self.output_model
 
     def resample_variance_data(self, data_model, add_image_kwargs):
         """ Resample and add input model's variance arrays to the output
