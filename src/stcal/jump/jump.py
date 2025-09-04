@@ -8,12 +8,12 @@ import warnings
 from scipy import signal
 
 import numpy as np
-import cv2 as cv
 import astropy.stats as stats
 
 from astropy.convolution import Ring2DKernel
 from astropy.convolution import convolve
 
+from . import image_ops
 from .twopoint_difference_class import TwoPointParams
 from . import twopoint_difference as twopt
 
@@ -382,13 +382,17 @@ def flag_large_events(gdq, jump_flag, sat_flag, jump_data):
                 not_current_sat = np.logical_not(current_sat)
                 next_new_sat = next_sat * not_current_sat
 
+            # jump_data.sat_required_snowball (set by step)
+            # only used if jump_data.sat_required_snowball is True
             next_sat_ellipses = find_ellipses(next_new_sat, sat_flag, jump_data.min_sat_area)
+            # only used if jump_data.sat_required_snowball is True
             sat_ellipses = find_ellipses(new_sat, sat_flag, jump_data.min_sat_area)
 
             # find the ellipse parameters for jump regions
             jump_ellipses = find_ellipses(
                 gdq[integration, group, :, :], jump_flag, jump_data.min_jump_area)
-            
+
+            # snowballs is only used internally but the count is returned
             if jump_data.sat_required_snowball:
                 gdq, snowballs, persist_jumps = make_snowballs(
                     gdq, integration, group, jump_ellipses, sat_ellipses,
@@ -399,7 +403,11 @@ def flag_large_events(gdq, jump_flag, sat_flag, jump_data):
             n_showers_grp.append(len(snowballs))
             total_snowballs += len(snowballs)
             gdq, num_events = extend_ellipses(
-                gdq, integration, group, snowballs, jump_data,
+                gdq,
+                integration,
+                group,
+                snowballs,  # ellipses
+                jump_data,
                 expansion=jump_data.expand_factor, num_grps_masked=0,
             )
 
@@ -429,7 +437,7 @@ def extend_saturation(cube, grp, sat_ellipses, jump_data, persist_jumps):
     grp : int
         The current group.
 
-    sat_ellipses : cv.ellipse
+    sat_ellipses : image_ops.ellipse
         The saturated ellipse.
 
     jump_data : JumpData
@@ -519,7 +527,7 @@ def ellipse_subim(ceny, cenx, axis1, axis2, alpha, value, shape):
     dn_over_2 = max(round(axis1/2), round(axis2/2)) + 2
 
     # Note that the convention between which index is x and which
-    # is y is a little confusing here.  To cv.ellipse, the first
+    # is y is a little confusing here.  To image_ops.ellipse, the first
     # coordinate corresponds to the second Python index.  That is
     # why x and y are a bit mixed up below.
 
@@ -529,15 +537,12 @@ def ellipse_subim(ceny, cenx, axis1, axis2, alpha, value, shape):
     iy2 = min(xc + dn_over_2 + 1, shape[0])
 
     image = np.zeros(shape=(iy2 - iy1, ix2 - ix1, 3), dtype=np.uint8)
-    image = cv.ellipse(
+    image = image_ops.ellipse(
         image,
         (yc - ix1, xc - iy1),
         (round(axis1 / 2), round(axis2 / 2)),
         alpha,
-        0,
-        360,
         (0, 0, value),
-        -1,
     )
 
     # The last ("blue") part contains the filled ellipse that we want.
@@ -564,7 +569,7 @@ def extend_ellipses(
     grp : int
         The current group.
 
-    ellipses : cv.ellipse
+    ellipses : image_ops.ellipse
         Ellipses for events.
 
     jump_data : JumpData
@@ -643,13 +648,7 @@ def find_ellipses(dqplane, bitmask, min_area):
     # at least the minimum
     # area and return a list of the minimum enclosing ellipse parameters.
     pixels = np.bitwise_and(dqplane, bitmask)
-    contours, hierarchy = cv.findContours(pixels, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
-    bigcontours = [con for con in contours if cv.contourArea(con) > min_area]
-
-    # minAreaRect is used because fitEllipse requires 5 points and it is
-    # possible to have a contour
-    # with just 4 points.
-    return [cv.minAreaRect(con) for con in bigcontours]
+    return image_ops.find_areas(pixels, min_area)
 
 
 def make_snowballs(
@@ -670,13 +669,13 @@ def make_snowballs(
     group : int
         The current group being used.
 
-    jump_ellipses : cv.ellipses
+    jump_ellipses : image_ops.ellipses
         Ellipses computed based on jump detection.
 
-    sat_ellipses : cv.ellipses
+    sat_ellipses : image_ops.ellipses
         Ellipses computed based on saturation.
 
-    next_sat_ellipses : cv.ellipses
+    next_sat_ellipses : image_ops.ellipses
         Ellipses computed based on saturation in the next group.
 
     jump_data : JumpData
@@ -853,15 +852,15 @@ def find_faint_extended(
             if nints >= jump_data.minimum_sigclip_groups:
                 ratio = diff_meddiff_grp(intg, grp, median, stddev, first_diffs)
 
-            bigcontours = get_bigcontours(
-                    ratio, intg, grp, gdq, pdq, jump_data, ring_2D_kernel)
-
             # get the minimum enclosing rectangle which is the same as the
             # minimum enclosing ellipse
-            ellipses = [cv.minAreaRect(con) for con in bigcontours]
-            image = np.zeros(shape=(nrows, ncols, 3), dtype=np.uint8)
-            expand_by_ratio, expansion = True, 1.0
-            image = process_ellipses(ellipses, image, expand_by_ratio, expansion, jump_data)
+            ellipses = get_bigellipses(
+                    ratio, intg, grp, gdq, pdq, jump_data, ring_2D_kernel)
+
+            # image is created, written to, and never used?
+            # image = np.zeros(shape=(nrows, ncols, 3), dtype=np.uint8)
+            # expand_by_ratio, expansion = True, 1.0
+            # image = process_ellipses(ellipses, image, expand_by_ratio, expansion, jump_data)
 
             if len(ellipses) > 0:
                 # add all the showers for this integration to the list
@@ -1018,7 +1017,7 @@ def process_ellipses(ellipses, image, expand_by_ratio, expansion, jump_data):
         axes = compute_axes(expand_by_ratio, ellipse, expansion, jump_data)
         alpha = ellipse[2]
         color = (0, 0, jump_data.fl_jump)
-        image = cv.ellipse(image, cen, axes, alpha, 0, 360, color, -1)
+        image = image_ops.ellipse(image, cen, axes, alpha, color)
 
     return image
 
@@ -1067,7 +1066,7 @@ def compute_axes(expand_by_ratio, ellipse, expansion, jump_data):
     return (round(axis1 / 2), round(axis2 / 2))
 
 
-def get_bigcontours(ratio, intg, grp, gdq, pdq, jump_data, ring_2D_kernel):
+def get_bigellipses(ratio, intg, grp, gdq, pdq, jump_data, ring_2D_kernel):
     """Perform convolution to find contours larger than a minimum area.
 
     Parameters
@@ -1094,8 +1093,7 @@ def get_bigcontours(ratio, intg, grp, gdq, pdq, jump_data, ring_2D_kernel):
 
     Returns
     -------
-    bigcontours : list 
-        list of OpenCV countours
+    list of computed ellipses
     """
     masked_ratio = ratio[grp - 1].copy()
     jump_flag = jump_data.fl_jump
@@ -1118,12 +1116,7 @@ def get_bigcontours(ratio, intg, grp, gdq, pdq, jump_data, ring_2D_kernel):
     extended_emission = (masked_smoothed_ratio > jump_data.extend_snr_threshold).astype(np.uint8)
 
     #  find the contours of the extended emission
-    contours, hierarchy = cv.findContours(
-            extended_emission, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
-
-    #  get the contours that are above the minimum size
-    bigcontours = [con for con in contours if cv.contourArea(con) > jump_data.extend_min_area]
-    return bigcontours 
+    return image_ops.find_areas(extended_emission, jump_data.extend_min_area)
 
 
 
