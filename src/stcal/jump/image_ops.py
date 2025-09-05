@@ -37,7 +37,8 @@ import cv2 as cv
 import skimage.measure
 from skimage.measure import find_contours
 
-def ellipse(image, center, axes, angle, color):
+
+def cv_ellipse(image, center, axes, angle, color):
     # startAngle = always 0
     # endAngle = always 360
     # thickness = always -1
@@ -76,14 +77,22 @@ def minAreaRect(contour):
     return cv.minAreaRect(contour)
 
 
-def area_of_polygon(xy: np.ndarray) -> float:
-    """
-    apply shoelace algorithm on collection of xy vertex pairs
-    https://stackoverflow.com/questions/24467972/calculate-area-of-polygon-given-x-y-coordinates
-    """
-    return float(0.5 * np.abs(
-        np.dot(xy[:, 0], np.roll(xy[:, 1], 1)) - np.dot(xy[:, 1], np.roll(xy[:, 0], 1))
-    ))
+def cv_find_areas(image, threshold):
+    cv_contours, _ = findContours(image)
+    cv_big_contours = [con for con in cv_contours if contourArea(con) > threshold]
+    cv_min_areas = [minAreaRect(con) for con in cv_big_contours]
+    return cv_min_areas
+
+
+def sk_ellipse(image, center, axes, angle, color):
+    rr, cc = skimage.draw.ellipse(
+        center[1], center[0],
+        axes[1] + 1, axes[0] + 1,
+        image.shape,
+        np.radians(angle),
+    )
+    image[rr, cc] = color
+    return image
 
 
 def sk_find_area(image, threshold):
@@ -92,24 +101,26 @@ def sk_find_area(image, threshold):
     # these don't match since opencv treats the a 2x2 region of pixels
     # as area 1 instead of 4 :-|
     for region in skimage.measure.regionprops(lim):
+        # TODO not sure if this area is right
         if region.area < threshold:
             continue
-        # TODO fix formatting
-        min_areas.append(region.bbox)
+        if region.axis_major_length <= 1 or region.axis_minor_length <= 1:
+            # TODO why are some of these 0?
+            continue
+        # opencv returns
+        # [[cy, cx], [dx, dy], [angle]]
+        # where angle is in degrees, not sure what 0 is
+        # TODO not sure about dx/dy
+        min_areas.append([
+            [float(region.centroid[1]), float(region.centroid[0])],
+            [region.axis_minor_length - 1, region.axis_major_length - 1],
+            np.degrees(region.orientation)])
     return min_areas
 
+
+def ellipse(image, center, axes, angle, color):
+    return sk_ellipse(image, center, axes, angle, color)
+
+
 def find_areas(image, threshold):
-    cv_contours, _ = findContours(image)
-    cv_big_contours = [con for con in cv_contours if contourArea(con) > threshold]
-    cv_min_areas = [minAreaRect(con) for con in cv_big_contours]
-
-    # lim = skimage.measure.label(image)
-    # min_areas = []
-    # for region in skimage.measure.regionprops(lim):
-    #     if region.area < threshold:
-    #         continue
-    #     # TODO fix formatting
-    #     min_areas.append(region.bbox)
-    # breakpoint()
-
-    return cv_min_areas
+    return sk_find_area(image, threshold)
