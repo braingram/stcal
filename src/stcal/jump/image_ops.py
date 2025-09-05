@@ -32,7 +32,7 @@ find_faint_extended
 """
 import numpy as np
 
-import cv2 as cv
+#import cv2 as cv
 
 import skimage.measure
 from skimage.measure import find_contours
