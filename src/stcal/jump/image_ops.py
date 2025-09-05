@@ -32,7 +32,7 @@ find_faint_extended
 """
 import numpy as np
 
-#import cv2 as cv
+import cv2 as cv
 
 import skimage.measure
 from skimage.measure import find_contours
@@ -85,11 +85,19 @@ def cv_find_areas(image, threshold):
 
 
 def sk_ellipse(image, center, axes, angle, color):
+    # The sub-pixel fudge here is to nudge
+    # the skimage ellipse slightly closer to
+    # what opencv would produce. There is no
+    # exact match (as far as I can tell) but
+    # empirically this made things "close"
+    # where the skimage ellipse had some extra
+    # and some missing edge pixels (rather
+    # than only missing edge pixels without the fudge).
     rr, cc = skimage.draw.ellipse(
         center[1], center[0],
-        axes[1] + 1, axes[0] + 1,
+        axes[1] + 0.25, axes[0] + 0.25,
         image.shape,
-        np.radians(angle),
+        -np.radians(angle),
     )
     image[rr, cc] = color
     return image
@@ -98,29 +106,32 @@ def sk_ellipse(image, center, axes, angle, color):
 def sk_find_area(image, threshold):
     lim = skimage.measure.label(image)
     min_areas = []
-    # these don't match since opencv treats the a 2x2 region of pixels
-    # as area 1 instead of 4 :-|
     for region in skimage.measure.regionprops(lim):
-        # TODO not sure if this area is right
-        if region.area < threshold:
-            continue
-        if region.axis_major_length <= 1 or region.axis_minor_length <= 1:
-            # TODO why are some of these 0?
+        w = region.axis_major_length - 1
+        h = region.axis_minor_length - 1
+        # region.area returns the number of pixels in the region
+        # this does not match cv.contourArea which instead returns
+        # a smaller value (proportionately much smaller for small contours
+        # where a 2x2 pixel region returns a contourArea of 1).
+        # So instead we compute a different area here
+        #if (w * h) * region.solidity < threshold:
+        if (w * h) < threshold:
             continue
         # opencv returns
-        # [[cy, cx], [dx, dy], [angle]]
+        # [[cy, cx], [dy, dx], [angle]]
         # where angle is in degrees, not sure what 0 is
-        # TODO not sure about dx/dy
         min_areas.append([
             [float(region.centroid[1]), float(region.centroid[0])],
-            [region.axis_minor_length - 1, region.axis_major_length - 1],
-            np.degrees(region.orientation)])
+            [h, w],
+            -np.degrees(region.orientation)])
     return min_areas
 
 
 def ellipse(image, center, axes, angle, color):
+    #return cv_ellipse(image, center, axes, angle, color)
     return sk_ellipse(image, center, axes, angle, color)
 
 
 def find_areas(image, threshold):
+    #return cv_find_areas(image, threshold)
     return sk_find_area(image, threshold)
