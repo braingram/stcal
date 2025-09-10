@@ -112,7 +112,7 @@ def sk_find_area(image, threshold):
         # region.area returns the number of pixels in the region
         # this does not match cv.contourArea which instead returns
         # a smaller value where a 2x2 pixel region returns a contourArea of 1.
-        if region.area < threshold:
+        if region.area_filled < threshold:
             continue
         # opencv returns
         # [[cy, cx], [dy, dx], [angle]]
