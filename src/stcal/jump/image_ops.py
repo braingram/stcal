@@ -107,13 +107,15 @@ def sk_find_area(image, threshold):
     lim = skimage.measure.label(image)
     min_areas = []
     for region in skimage.measure.regionprops(lim):
-        w = region.axis_major_length - 1
-        h = region.axis_minor_length - 1
         # region.area returns the number of pixels in the region
         # this does not match cv.contourArea which instead returns
         # a smaller value where a 2x2 pixel region returns a contourArea of 1.
         if region.area_filled < threshold:
             continue
+        # wait util after area check so calculating the more expensive
+        # region properties is only done for areas that pass threshold
+        w = region.axis_major_length - 1
+        h = region.axis_minor_length - 1
         # opencv returns
         # [[cy, cx], [dy, dx], [angle]]
         # where angle is in degrees, not sure what 0 is
