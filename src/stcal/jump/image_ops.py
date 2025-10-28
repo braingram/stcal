@@ -24,7 +24,7 @@ def fit_ellipses(pixels, min_area):
     return [cv2.minAreaRect(con) for con in contours if cv2.contourArea(con) > min_area]
 
 
-def compute_axes(ellipse, expansion, jump_data):
+def compute_axes(ellipse, expansion, max_radius):
     """
     Expand the ellipse by the expansion factor.
 
@@ -41,8 +41,8 @@ def compute_axes(ellipse, expansion, jump_data):
     expansion : float
         The factor that increases the size of the snowball or enclosed ellipse.
 
-    jump_data : JumpData
-        Class containing parameters and methods to detect jumps.
+    max_radius : float
+        Maximum allowable absolute radius.
 
     Returns
     -------
@@ -55,8 +55,8 @@ def compute_axes(ellipse, expansion, jump_data):
     else:
         axis1 = ellipse[1][0] * expansion
         axis2 = ellipse[1][1] + (expansion - 1.0) * ellipse[1][0]
-    axis1 = min(axis1, jump_data.max_extended_radius)
-    axis2 = min(axis2, jump_data.max_extended_radius)
+    axis1 = min(axis1, max_radius)
+    axis2 = min(axis2, max_radius)
 
     return (round(axis1 / 2), round(axis2 / 2))
 
@@ -107,7 +107,7 @@ def extend_ellipses(
     for ellipse in ellipses:
         ceny = ellipse[0][0]
         cenx = ellipse[0][1]
-        axes = compute_axes(ellipse, expansion, jump_data)
+        axes = compute_axes(ellipse, expansion, jump_data.max_extended_radius)
 
         alpha = ellipse[2]
 
