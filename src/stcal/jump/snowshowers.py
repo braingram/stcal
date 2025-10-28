@@ -96,7 +96,7 @@ def find_faint_extended(
     for showers in all_ellipses:
         intg, grp, ellipses = showers[:3]
         total_showers += len(ellipses)
-        gdq, num = extend_ellipses(
+        gdq = extend_ellipses(
             gdq,
             intg,
             grp,

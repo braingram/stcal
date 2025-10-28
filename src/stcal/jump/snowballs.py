@@ -2,7 +2,7 @@ import logging
 
 import numpy as np
 
-from .image_ops import ellipse_subim, extend_ellipses, fit_ellipses
+from .image_ops import ellipse_coords, extend_ellipses, fit_ellipses
 
 log = logging.getLogger(__name__)
 
@@ -68,7 +68,7 @@ def flag_large_events(gdq, jump_flag, sat_flag, jump_data):
                 snowballs = jump_ellipses
             n_showers_grp.append(len(snowballs))
             total_snowballs += len(snowballs)
-            gdq, num_events = extend_ellipses(
+            gdq = extend_ellipses(
                 gdq, integration, group, snowballs, jump_data,
                 jump_data.expand_factor, 0,
             )
@@ -250,37 +250,25 @@ def extend_saturation(cube, grp, sat_ellipses, jump_data, persist_jumps):
     ngroups, nrows, ncols = cube.shape
     satcolor = 22  # (0, 0, 22) is a dark blue in RGB
     for ellipse in sat_ellipses:
-        ceny = ellipse[0][0]
-        cenx = ellipse[0][1]
-        cen = (round(ceny), round(cenx))
-        minor_axis = min(ellipse[1][1], ellipse[1][0])
+        if min(ellipse[1]) > jump_data.min_sat_radius_extend:
+            ys, xs = ellipse_coords(
+                (
+                    (ellipse[0][0], ellipse[0][1]),
+                    (
+                        min(ellipse[1][0] + jump_data.sat_expand, jump_data.max_extended_radius),
+                        min(ellipse[1][1] + jump_data.sat_expand, jump_data.max_extended_radius),
+                    ),
+                    ellipse[2],
+                ),
+                (nrows, ncols),
+            )
 
-        if minor_axis > jump_data.min_sat_radius_extend:
-            axis1 = ellipse[1][0] + jump_data.sat_expand
-            axis2 = ellipse[1][1] + jump_data.sat_expand
-            axis1 = min(axis1, jump_data.max_extended_radius)
-            axis2 = min(axis2, jump_data.max_extended_radius)
-
-            alpha = ellipse[2]
-
-            indx, sat_ellipse = ellipse_subim(
-                ceny, cenx, axis1, axis2, alpha, satcolor, (nrows, ncols))
-            (iy1, iy2, ix1, ix2) = indx
+            for i in range(grp, cube.shape[0]):
+                cube[i, ys, xs] = jump_data.fl_sat
 
             # Create another non-extended ellipse that is used to
             # create the persist_jumps for this integration. This
             # will be used to mask groups in subsequent integrations.
 
-            is_sat = sat_ellipse == satcolor
-            for i in range(grp, cube.shape[0]):
-                cube[i][iy1:iy2, ix1:ix2][is_sat] = jump_data.fl_sat
-
-            ax1, ax2 = (ellipse[1][0], ellipse[1][1])
-            indx, persist_ellipse = ellipse_subim(
-                ceny, cenx, ax1, ax2, alpha, satcolor, (nrows, ncols))
-            (iy1, iy2, ix1, ix2) = indx
-
-            persist_mask = persist_ellipse == satcolor
-            persist_jumps[iy1:iy2, ix1:ix2][persist_mask] = jump_data.fl_jump
-
+            persist_jumps[*ellipse_coords(ellipse, (nrows, ncols))] = jump_data.fl_jump
     return cube, persist_jumps
