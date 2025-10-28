@@ -70,7 +70,7 @@ def flag_large_events(gdq, jump_flag, sat_flag, jump_data):
             total_snowballs += len(snowballs)
             gdq, num_events = extend_ellipses(
                 gdq, integration, group, snowballs, jump_data,
-                expansion=jump_data.expand_factor, num_grps_masked=0,
+                jump_data.expand_factor, 0,
             )
 
     #  Test to see if the flagging of the saturated cores will be

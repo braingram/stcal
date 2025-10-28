@@ -102,9 +102,8 @@ def find_faint_extended(
             grp,
             ellipses,
             jump_data,
-            expansion=jump_data.extend_ellipse_expand_ratio,
-            expand_by_ratio=True,
-            num_grps_masked=jump_data.grps_masked_after_shower,
+            jump_data.extend_ellipse_expand_ratio,
+            jump_data.grps_masked_after_shower,
         )
 
     gdq = max_flux_showers(jump_data, nints, indata, ingdq, gdq)

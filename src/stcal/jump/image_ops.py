@@ -24,7 +24,7 @@ def fit_ellipses(pixels, min_area):
     return [cv2.minAreaRect(con) for con in contours if cv2.contourArea(con) > min_area]
 
 
-def compute_axes(expand_by_ratio, ellipse, expansion, jump_data):
+def compute_axes(ellipse, expansion, jump_data):
     """
     Expand the ellipse by the expansion factor.
 
@@ -35,9 +35,6 @@ def compute_axes(expand_by_ratio, ellipse, expansion, jump_data):
 
     Parameters
     ----------
-    expand_by_ratio : bool
-        Should the axes be expanded?
-
     ellipse : cv2.ellipse
         Ellipse to expand.
 
@@ -52,16 +49,12 @@ def compute_axes(expand_by_ratio, ellipse, expansion, jump_data):
     axes : tuple
         Expanded and rounded ellipse axes.
     """
-    if expand_by_ratio:
-        if ellipse[1][1] < ellipse[1][0]:
-            axis1 = ellipse[1][0] + (expansion - 1.0) * ellipse[1][1]
-            axis2 = ellipse[1][1] * expansion
-        else:
-            axis1 = ellipse[1][0] * expansion
-            axis2 = ellipse[1][1] + (expansion - 1.0) * ellipse[1][0]
+    if ellipse[1][1] < ellipse[1][0]:
+        axis1 = ellipse[1][0] + (expansion - 1.0) * ellipse[1][1]
+        axis2 = ellipse[1][1] * expansion
     else:
-        axis1 = ellipse[1][0] + expansion
-        axis2 = ellipse[1][1] + expansion
+        axis1 = ellipse[1][0] * expansion
+        axis2 = ellipse[1][1] + (expansion - 1.0) * ellipse[1][0]
     axis1 = min(axis1, jump_data.max_extended_radius)
     axis2 = min(axis2, jump_data.max_extended_radius)
 
@@ -70,7 +63,7 @@ def compute_axes(expand_by_ratio, ellipse, expansion, jump_data):
 
 def extend_ellipses(
     gdq_cube, intg, grp, ellipses, jump_data,
-    expansion=1.9, expand_by_ratio=True, num_grps_masked=1,
+    expansion, num_grps_masked,
 ):
     """
     Extend the ellipses.
@@ -95,9 +88,6 @@ def extend_ellipses(
     expansion : float
         The factor that increases the size of the snowball or enclosed ellipse.
 
-    expand_by_ratio : bool
-        Should the ellipse expansion be used?
-
     num_grps_masked : int
         The number of groups flagged.
 
@@ -117,7 +107,7 @@ def extend_ellipses(
     for ellipse in ellipses:
         ceny = ellipse[0][0]
         cenx = ellipse[0][1]
-        axes = compute_axes(expand_by_ratio, ellipse, expansion, jump_data)
+        axes = compute_axes(ellipse, expansion, jump_data)
 
         alpha = ellipse[2]
 
