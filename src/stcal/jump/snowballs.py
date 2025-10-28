@@ -156,7 +156,7 @@ def make_snowballs(
     -------
     gdq : ndarray
         The 4-D group DQ array.
-        
+
     snowballs : list
         List of snowballs found.
 
@@ -311,7 +311,7 @@ def extend_ellipses(
         indx, jump_ellipse = ellipse_subim(
             ceny, cenx, axis1, axis2, alpha, jump_data.fl_jump, (nrows, ncols))
         (iy1, iy2, ix1, ix2) = indx
-        
+
         # Propagate forward by num_grps_masked groups.
 
         for flg_grp in range(grp, min(grp + num_grps_masked + 1, ngroups)):
@@ -389,7 +389,7 @@ def ellipse_subim(ceny, cenx, axis1, axis2, alpha, value, shape):
 def extend_saturation(cube, grp, sat_ellipses, jump_data, persist_jumps):
     """
     Extend the saturated ellipses that are larger than the min_sat_radius.
-    
+
     Parameters
     ----------
     cube : ndarray
@@ -495,5 +495,3 @@ def compute_axes(expand_by_ratio, ellipse, expansion, jump_data):
     axis2 = min(axis2, jump_data.max_extended_radius)
 
     return (round(axis1 / 2), round(axis2 / 2))
-
-

@@ -7,7 +7,7 @@ from astropy import stats
 from astropy.convolution import Ring2DKernel
 from scipy import signal
 
-from .snowballs import compute_axes, extend_ellipses
+from .snowballs import extend_ellipses
 
 log = logging.getLogger(__name__)
 
@@ -87,9 +87,6 @@ def find_faint_extended(
             # get the minimum enclosing rectangle which is the same as the
             # minimum enclosing ellipse
             ellipses = [cv.minAreaRect(con) for con in bigcontours]
-            image = np.zeros(shape=(nrows, ncols, 3), dtype=np.uint8)
-            expand_by_ratio, expansion = True, 1.0
-            image = process_ellipses(ellipses, image, expand_by_ratio, expansion, jump_data)
 
             if len(ellipses) > 0:
                 # add all the showers for this integration to the list
@@ -460,40 +457,3 @@ def max_flux_showers(jump_data, nints, indata, ingdq, gdq):
         gdq[intg, :, indx[0], indx[1]] = ingdq[intg, :, indx[0], indx[1]]
 
     return gdq
-
-
-def process_ellipses(ellipses, image, expand_by_ratio, expansion, jump_data):
-    """
-    Draw ellipses onto an image.
-
-    Parameters
-    ----------
-    ellipses : list
-        List of ellipses
-
-    image : ndarray
-        The image on which to draw the ellipses.
-
-    expand_by_ratio : bool
-        Should the ellipses be expanded?
-
-    expansion : float
-        The ellipse expansion factor
-
-    jump_data : JumpData
-        Class containing parameters and methods to detect jumps.
-
-    Returns
-    -------
-    image : ndarray
-        The image with ellipses drawn on it.
-    """
-    for ellipse in ellipses:
-        ceny, cenx = ellipse[0][0], ellipse[0][1]
-        cen = (round(ellipse[0][0]), round(ellipse[0][1]))
-        axes = compute_axes(expand_by_ratio, ellipse, expansion, jump_data)
-        alpha = ellipse[2]
-        color = (0, 0, jump_data.fl_jump)
-        image = cv.ellipse(image, cen, axes, alpha, 0, 360, color, -1)
-
-    return image
