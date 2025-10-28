@@ -1,13 +1,12 @@
 import logging
 import warnings
 
-import cv2 as cv
 import numpy as np
 from astropy import stats
 from astropy.convolution import Ring2DKernel
 from scipy import signal
 
-from .snowballs import extend_ellipses
+from .image_ops import extend_ellipses, fit_ellipses
 
 log = logging.getLogger(__name__)
 
@@ -59,61 +58,54 @@ def find_faint_extended(
 
     all_ellipses = []
 
-    warnings.filterwarnings("ignore")
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore")
+        read_noise_2 = readnoise_2d**2
+        if nints >= jump_data.minimum_sigclip_groups:
+            mean, median, stddev = stats.sigma_clipped_stats(first_diffs, sigma=5, axis=0)
+        else:
+            median_diffs = np.nanmedian(first_diffs, axis=(0, 1))
+            sigma = np.sqrt(np.abs(median_diffs) + read_noise_2 / jump_data.nframes)
 
-    read_noise_2 = readnoise_2d**2
-    if nints >= jump_data.minimum_sigclip_groups:
-        mean, median, stddev = stats.sigma_clipped_stats(first_diffs, sigma=5, axis=0)
-    else:
-        median_diffs = np.nanmedian(first_diffs, axis=(0, 1))
-        sigma = np.sqrt(np.abs(median_diffs) + read_noise_2 / jump_data.nframes)
+        for intg in range(nints):
+            if nints < jump_data.minimum_sigclip_groups:
+                # The difference from the median difference for each group
+                ratio = diff_meddiff_int(intg, median_diffs, sigma, first_diffs)
 
-    for intg in range(nints):
-        if nints < jump_data.minimum_sigclip_groups:
-            # The difference from the median difference for each group
-            ratio = diff_meddiff_int(intg, median_diffs, sigma, first_diffs)
+            #  The convolution kernel creation
+            ring_2D_kernel = Ring2DKernel(
+                    jump_data.extend_inner_radius, jump_data.extend_outer_radius)
+            first_good_group = find_first_good_group(gdq[intg, :, :, :], jump_data.fl_dnu)
+            for grp in range(first_good_group + 1, ngrps):
+                if nints >= jump_data.minimum_sigclip_groups:
+                    ratio = diff_meddiff_grp(intg, grp, median, stddev, first_diffs)
 
-        #  The convolution kernel creation
-        ring_2D_kernel = Ring2DKernel(
-                jump_data.extend_inner_radius, jump_data.extend_outer_radius)
-        first_good_group = find_first_good_group(gdq[intg, :, :, :], jump_data.fl_dnu)
-        for grp in range(first_good_group + 1, ngrps):
-            if nints >= jump_data.minimum_sigclip_groups:
-                ratio = diff_meddiff_grp(intg, grp, median, stddev, first_diffs)
+                ellipses = get_bigellipses(
+                        ratio, intg, grp, gdq, pdq, jump_data, ring_2D_kernel)
 
-            bigcontours = get_bigcontours(
-                    ratio, intg, grp, gdq, pdq, jump_data, ring_2D_kernel)
+                if len(ellipses) > 0:
+                    # add all the showers for this integration to the list
+                    all_ellipses.append([intg, grp, ellipses])
 
-            # get the minimum enclosing rectangle which is the same as the
-            # minimum enclosing ellipse
-            ellipses = [cv.minAreaRect(con) for con in bigcontours]
-
-            if len(ellipses) > 0:
-                # add all the showers for this integration to the list
-                all_ellipses.append([intg, grp, ellipses])
-                # Reset the warnings filter to its original state
-
-    warnings.resetwarnings()
     total_showers = 0
 
-    if all_ellipses:
-        #  Now we actually do the flagging of the pixels inside showers.
-        # This is deferred until all showers are detected. because the showers
-        # can flag future groups and would confuse the detection algorithm if
-        # we worked on groups that already had some flagged showers.
-        for showers in all_ellipses:
-            intg, grp, ellipses = showers[:3]
-            total_showers += len(ellipses)
-            gdq, num = extend_ellipses(
-                gdq,
-                intg,
-                grp,
-                ellipses,
-                jump_data,
-                expansion=jump_data.extend_ellipse_expand_ratio,
-                expand_by_ratio=True,
-                num_grps_masked=jump_data.grps_masked_after_shower,
-            )
+    #  Now we actually do the flagging of the pixels inside showers.
+    # This is deferred until all showers are detected. because the showers
+    # can flag future groups and would confuse the detection algorithm if
+    # we worked on groups that already had some flagged showers.
+    for showers in all_ellipses:
+        intg, grp, ellipses = showers[:3]
+        total_showers += len(ellipses)
+        gdq, num = extend_ellipses(
+            gdq,
+            intg,
+            grp,
+            ellipses,
+            jump_data,
+            expansion=jump_data.extend_ellipse_expand_ratio,
+            expand_by_ratio=True,
+            num_grps_masked=jump_data.grps_masked_after_shower,
+        )
 
     gdq = max_flux_showers(jump_data, nints, indata, ingdq, gdq)
 
@@ -277,21 +269,19 @@ def find_first_good_group(int_gdq, do_not_use):
     return first_good_group
 
 
-def convolve_fast(inarray, kernel, copy=False):
+def convolve_fast(array, kernel):
     """Convolve an array with a kernel, interpolating over NaNs.
     Faster version of astropy.convolution.convolve(preserve_nan=True)
     Parameters
     ----------
-    inarray : 2D array of floats
+    array : 2D array of floats
         Array for convolution
     kernel : 2D array of floats
         Convolution kernel.  Both dimensions must be odd.
-    copy : bool
-        Make a copy of inarray to avoid modifying NaN values.  Default False.
     Returns
     -------
     convolved_array : 2D array of floats
-        Convolution of inarray and kernel, interpolating over NaNs.
+        Convolution of array and kernel, interpolating over NaNs.
     """
 
     # We will mask nan pixels by setting them to zero.  We
@@ -301,13 +291,8 @@ def convolve_fast(inarray, kernel, copy=False):
     # initially nan pixels to nan.
     #
     # This function is equivalent to
-    # convolved_array = astropy.convolution.convolve(inarray, kernel, preserve_nan=True)
+    # convolved_array = astropy.convolution.convolve(array, kernel, preserve_nan=True)
     # but runs in about half the time.
-
-    if copy:
-        array = inarray.copy()
-    else:
-        array = inarray
 
     good = np.isfinite(array)
     array[~good] = 0
@@ -335,7 +320,7 @@ def convolve_fast(inarray, kernel, copy=False):
     return convolved_array
 
 
-def get_bigcontours(ratio, intg, grp, gdq, pdq, jump_data, ring_2D_kernel):
+def get_bigellipses(ratio, intg, grp, gdq, pdq, jump_data, ring_2D_kernel):
     """Perform convolution to find contours larger than a minimum area.
 
     Parameters
@@ -362,8 +347,8 @@ def get_bigcontours(ratio, intg, grp, gdq, pdq, jump_data, ring_2D_kernel):
 
     Returns
     -------
-    bigcontours : list 
-        list of OpenCV countours
+    list
+        list of ellipses
     """
     masked_ratio = ratio[grp - 1].copy()
     jump_flag = jump_data.fl_jump
@@ -378,20 +363,12 @@ def get_bigcontours(ratio, intg, grp, gdq, pdq, jump_data, ring_2D_kernel):
 
     kernel = ring_2D_kernel.array
 
-    # Equivalent to but faster than
-    # masked_smoothed_ratio = convolve(masked_ratio, ring_2D_kernel, preserve_nan=True)
-
     masked_smoothed_ratio = convolve_fast(masked_ratio, kernel)
 
     extended_emission = (masked_smoothed_ratio > jump_data.extend_snr_threshold).astype(np.uint8)
 
     #  find the contours of the extended emission
-    contours, hierarchy = cv.findContours(
-            extended_emission, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
-
-    #  get the contours that are above the minimum size
-    bigcontours = [con for con in contours if cv.contourArea(con) > jump_data.extend_min_area]
-    return bigcontours
+    return fit_ellipses(extended_emission, jump_data.extend_min_area)
 
 
 def max_flux_showers(jump_data, nints, indata, ingdq, gdq):

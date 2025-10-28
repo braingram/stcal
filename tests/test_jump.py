@@ -12,7 +12,7 @@ from stcal.jump.snowshowers import (
 )
 from stcal.jump.snowballs import (
     extend_saturation,
-    find_ellipses,
+    fit_ellipses,
     flag_large_events,
     point_inside_ellipse,
 )
@@ -209,7 +209,7 @@ def test_multiprocessing_big():
     assert gdq[0, 4, 204, 6] == DNU  #This value would have been 5 without the fix.
 
 
-def test_find_simple_ellipse():
+def test_fit_simple_ellipse():
     plane = np.zeros(shape=(5, 5), dtype=np.uint8)
     plane[2, 2] = JUMP
     plane[3, 2] = JUMP
@@ -219,18 +219,18 @@ def test_find_simple_ellipse():
     plane[1, 3] = JUMP
     plane[2, 4] = JUMP
     plane[3, 3] = JUMP
-    ellipse = find_ellipses(plane, JUMP, 1)
+    ellipse = fit_ellipses(plane & JUMP, 1)
 
     assert ellipse[0][2] == pytest.approx(45.0, 1e-3)  # 90 degree rotation
     assert ellipse[0][0] == pytest.approx((2.5, 2.0))  # center
 
 
-def test_find_ellipse2():
+def test_fit_ellipse2():
     plane = np.zeros(shape=(5, 5), dtype=np.uint8)
     plane[1, :] = [0, JUMP, JUMP, JUMP, 0]
     plane[2, :] = [0, JUMP, JUMP, JUMP, 0]
     plane[3, :] = [0, JUMP, JUMP, JUMP, 0]
-    ellipses = find_ellipses(plane, JUMP, 1)
+    ellipses = fit_ellipses(plane & JUMP, 1)
     ellipse = ellipses[0]
     assert ellipse[0][0] == 2
     assert ellipse[0][1] == 2
@@ -251,7 +251,7 @@ def test_extend_saturation_simple():
     cube[1, 3, 2] = SAT
 
     cube[1, 2, 2] = JUMP
-    sat_circles = find_ellipses(cube[grp, :, :], SAT, 1)
+    sat_circles = fit_ellipses(cube[grp, :, :] & SAT, 1)
 
     jump_data = JumpData(dqflags=DQFLAGS)
     jump_data.min_sat_radius_extend = 1.1
