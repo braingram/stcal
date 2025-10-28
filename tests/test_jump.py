@@ -4,13 +4,17 @@ from astropy.io import fits
 from stcal.jump.jump_class import JumpData
 from stcal.jump.jump import (
     calc_num_slices,
+    detect_jumps_data,
+)
+from stcal.jump.snowshowers import (
+    find_faint_extended,
+    find_first_good_group,
+)
+from stcal.jump.snowballs import (
     extend_saturation,
     find_ellipses,
-    find_faint_extended,
     flag_large_events,
     point_inside_ellipse,
-    find_first_good_group,
-    detect_jumps_data
 )
 
 DQFLAGS = {
