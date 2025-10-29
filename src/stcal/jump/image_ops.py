@@ -112,7 +112,7 @@ def extend_ellipses(
         for flg_grp in range(grp, min(grp + num_grps_masked + 1, ngroups)):
 
             # Only propagate the snowball forward to unsaturated pixels.
-            sat_mask = (gdq_cube[intg, flg_grp, ys, xs] ^ jump_data.fl_sat).astype(bool)
+            sat_mask = (gdq_cube[intg, flg_grp, ys, xs] & jump_data.fl_sat) == 0
             gdq_cube[intg, flg_grp, ys[sat_mask], xs[sat_mask]] |= jump_data.fl_jump
 
     return gdq_cube
