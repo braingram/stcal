@@ -130,7 +130,7 @@ class SkyImage:
         skystat=None,
         stepsize=None,
         meta=None,
-        reduce_memory_usage=True,
+        reduce_memory_usage=False,
     ):
         """Initialize the SkyImage object.
 
