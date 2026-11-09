@@ -6,9 +6,14 @@ A module that provides functions for matching sky in overlapping images.
 """
 
 import logging
+import multiprocessing
 from datetime import datetime
+from itertools import combinations, starmap
+from multiprocessing import cpu_count
 
 import numpy as np
+
+from stcal.multiprocessing import compute_num_cores
 
 from .skyimage import SkyGroup, SkyImage
 
@@ -18,7 +23,7 @@ __all__ = ["skymatch"]
 log = logging.getLogger(__name__)
 
 
-def skymatch(images, skymethod="global+match", match_down=True, subtract=False):
+def skymatch(images, skymethod="global+match", match_down=True, subtract=False, max_cores="none"):
     """
     Compute and/or "equalize" sky background in input images.
 
@@ -81,6 +86,15 @@ def skymatch(images, skymethod="global+match", match_down=True, subtract=False):
     subtract : bool
         Subtract computed sky value from image data.
         (Default: `False`).
+
+    max_cores : str, optional
+        Number of cores to use for computing sky values in overlapping regions.
+        If set to 'none' (the default), no multiprocessing is used. Other
+        allowable values are 'quarter', 'half', 'all', and string integers.
+        The total number of cores includes SMT cores (Hyper Threading for Intel).
+        This setting applies only to 'match' and 'global+match'. When using
+        multiprocessing, input images and their WCS and sky statistics
+        callables must be pickleable.
 
     Raises
     ------
@@ -266,7 +280,7 @@ drizzlepac/astrodrizzle.html>`_.
         log.info("----  Computing differences in sky values in overlapping regions.")
 
         # find "optimum" sky changes:
-        sky_deltas = _find_optimum_sky_deltas(images, apply_sky=not subtract)
+        sky_deltas = _find_optimum_sky_deltas(images, apply_sky=not subtract, max_cores=max_cores)
         sky_good = np.isfinite(sky_deltas)
 
         if np.any(sky_good):
@@ -393,31 +407,46 @@ def _apply_sky(images, sky_deltas, do_global, do_skysub, show_old):
             img.is_sky_valid = valid
 
 
-def _overlap_matrix(images, apply_sky=True):
+def _calc_sky_overlap(image1, image2, apply_sky):
+    """Compute sky statistics in both directions for an image pair."""
+    return (
+        image1.calc_sky(overlap=image2, delta=apply_sky),
+        image2.calc_sky(overlap=image1, delta=apply_sky),
+    )
+
+
+def _overlap_matrix(images, apply_sky=True, max_cores="none"):
     ns = len(images)
     A = np.zeros((ns, ns), dtype=float)  # noqa: N806
     W = np.zeros((ns, ns), dtype=float)  # noqa: N806
 
-    for i in range(ns):
-        for j in range(i + 1, ns):
-            s1, w1, area1 = images[i].calc_sky(overlap=images[j], delta=apply_sky)
+    pairs = list(combinations(range(ns), 2))
+    number_slices = compute_num_cores(max_cores, len(pairs), cpu_count())
+    log.info("Number of multiprocessing slices: %s", number_slices)
+    args = ((images[i], images[j], apply_sky) for i, j in pairs)
 
-            s2, w2, area2 = images[j].calc_sky(overlap=images[i], delta=apply_sky)
+    if number_slices <= 1:
+        results = starmap(_calc_sky_overlap, args)
+    else:
+        ctx = multiprocessing.get_context("spawn")
+        with ctx.Pool(processes=number_slices) as pool:
+            results = pool.starmap(_calc_sky_overlap, args)
 
-            if area1 == 0.0 or area2 == 0.0 or s1 is None or s2 is None:
-                continue
+    for (i, j), ((s1, w1, area1), (s2, w2, area2)) in zip(pairs, results, strict=True):
+        if area1 == 0.0 or area2 == 0.0 or s1 is None or s2 is None:
+            continue
 
-            A[j, i] = s1
-            W[j, i] = w1
-            A[i, j] = s2
-            W[i, j] = w2
+        A[j, i] = s1
+        W[j, i] = w1
+        A[i, j] = s2
+        W[i, j] = w2
 
     return A, W
 
 
-def _find_optimum_sky_deltas(images, apply_sky=True):
+def _find_optimum_sky_deltas(images, apply_sky=True, max_cores="none"):
     ns = len(images)
-    A, W = _overlap_matrix(images, apply_sky=apply_sky)  # noqa: N806
+    A, W = _overlap_matrix(images, apply_sky=apply_sky, max_cores=max_cores)  # noqa: N806
 
     def is_valid(i, j):
         return W[i, j] > 0 and W[j, i] > 0
